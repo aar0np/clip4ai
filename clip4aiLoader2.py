@@ -2,7 +2,8 @@ import os
 from PIL import Image
 from cassandra.cluster import Cluster
 from cassandra.auth import PlainTextAuthProvider
-from sentence_transformers import SentenceTransformer
+from langchain.vectorstores import Cassandra
+from langchain.embeddings  import HuggingFaceEmbeddings
 
 ASTRA_DB_TOKEN_BASED_PASSWORD = os.environ['ASTRA_DB_APPLICATION_TOKEN']
 ASTRA_DB_KEYSPACE = input('Your Astra Keyspace name: ')
@@ -23,22 +24,13 @@ cluster = Cluster(cloud=cloud_config, auth_provider=auth_provider,
         protocol_version=4)
 session = cluster.connect()
 
-session.execute(f"""CREATE TABLE IF NOT EXISTS {KEYSPACE_NAME}.{TABLE_NAME}
-(id int PRIMARY KEY,
- name TEXT,
- description TEXT,
- item_vector vector<float, 512>)""")
+embeddings = HuggingFaceEmbeddings()
+vectorstore = Cassandra(embeddings, session, KEYSPACE_NAME, TABLE_NAME)
 
-session.execute(f"""
-    CREATE CUSTOM INDEX IF NOT EXISTS image_ann_index
-    ON {KEYSPACE_NAME}.{TABLE_NAME}(item_vector)
-    USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'
-""")
+# initialize the all-MiniLM-L6-v2 model locally
+model = HuggingFaceEmbeddings(model_name="clip-ViT-B-32")
 
-session.execute(f"TRUNCATE TABLE {KEYSPACE_NAME}.{TABLE_NAME}")
-
-model = SentenceTransformer('clip-ViT-B-32')
-
+# generate embeddings
 img_emb1 = model.encode(Image.open('images/one.jpg'))
 img_emb2 = model.encode(Image.open('images/two.jpg'))
 img_emb3 = model.encode(Image.open('images/three.jpg'))
@@ -55,8 +47,4 @@ image_data = [
     (6, 'pink_house.jpg', 'description6', img_emb6.tolist()),
 ]
 
-for image in image_data:
-    session.execute(f"""
-        INSERT INTO {KEYSPACE_NAME}.{TABLE_NAME} (id, name, description, item_vector)
-        VALUES {image}
-    """)
+vectorstore.add_texts(texts=image_data)

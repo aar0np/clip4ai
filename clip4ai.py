@@ -26,9 +26,9 @@ cluster = Cluster(cloud=cloud_config, auth_provider=auth_provider,
 session = cluster.connect()
 
 query_string = "a house with a swimming pool"
+model = SentenceTransformer('clip-ViT-B-32')
 
 while query_string != "exit":
-    model = SentenceTransformer('clip-ViT-B-32')
     text_emb = model.encode(query_string)
 
     #print(f"""
@@ -39,7 +39,7 @@ while query_string != "exit":
     for row in session.execute(f"SELECT name, description, item_vector FROM {KEYSPACE_NAME}.{TABLE_NAME} ORDER BY item_vector ANN OF {text_emb.tolist()} LIMIT 1"):
         #print("\t" + str(row))
         plt.title(row.name)
-        image = mpimg.imread(row.name)
+        image = mpimg.imread("images/" + row.name)
         plt.imshow(image)
         plt.show()
 
