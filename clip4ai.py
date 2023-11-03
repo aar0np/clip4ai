@@ -1,48 +1,43 @@
+from pathlib import Path
 import os
 from PIL import Image
-from cassandra.cluster import Cluster
-from cassandra.auth import PlainTextAuthProvider
-from sentence_transformers import SentenceTransformer
 from matplotlib import pyplot as plt
 from matplotlib import image as mpimg
 
-ASTRA_DB_TOKEN_BASED_PASSWORD = os.environ['ASTRA_DB_APPLICATION_TOKEN']
-ASTRA_DB_KEYSPACE = input('Your Astra Keyspace name: ')
+from multimodal_support import (
+    MultiModalHuggingFaceEmbeddings,
+    MultiModalCassandra,
+)
+import cassio
 
-# specify secure bundle
-SECURE_CONNECT_BUNDLE_PATH = os.environ['ASTRA_SCB_PATH']
 
-ASTRA_CLIENT_ID = 'token'
-ASTRA_CLIENT_SECRET = ASTRA_DB_TOKEN_BASED_PASSWORD
-KEYSPACE_NAME = ASTRA_DB_KEYSPACE
-TABLE_NAME = 'images'
+cassio.init(
+    database_id=os.environ["ASTRA_DB_ID"],
+    token=os.environ["ASTRA_DB_APPLICATION_TOKEN"],
+    keyspace=os.environ.get("ASTRA_DB_KEYSPACE"),
+)
 
-cloud_config= {
-    'secure_connect_bundle': SECURE_CONNECT_BUNDLE_PATH
-}
-auth_provider = PlainTextAuthProvider(ASTRA_CLIENT_ID, ASTRA_CLIENT_SECRET)
-cluster = Cluster(cloud=cloud_config, auth_provider=auth_provider,
-        protocol_version=4)
-session = cluster.connect()
+vector_store_name = 'images'
+
+clip_embeddings = MultiModalHuggingFaceEmbeddings(model_name="clip-ViT-B-32")
+vectorstore = MultiModalCassandra(embedding=clip_embeddings, table_name=vector_store_name, session=None, keyspace=None)
 
 query_string = "a house with a swimming pool"
-model = SentenceTransformer('clip-ViT-B-32')
 
-while query_string != "exit":
-    text_emb = model.encode(query_string)
+while query_string.lower() != "exit" and query_string != "":
+    results = vectorstore.similarity_search(query_string, k=1)
+    if results == []:
+        print("\n\n** It appears that the vector store is empty. Please populate it first **\n")
+        break
 
-    #print(f"""
-    #    Model provided embeddings for the string:
-    #    '{query_string}': {text_emb.tolist()}
-    #""")
-
-    for row in session.execute(f"SELECT name, description, item_vector FROM {KEYSPACE_NAME}.{TABLE_NAME} ORDER BY item_vector ANN OF {text_emb.tolist()} LIMIT 1"):
-        #print("\t" + str(row))
-        plt.title(row.name)
-        image = mpimg.imread("images/" + row.name)
-        plt.imshow(image)
-        plt.show()
-
-    query_string = input('Next query? ')
+    result = results[0]
+    image_path = result.metadata["path"]
+    #
+    plt.title(query_string + " / " + image_path)
+    image = mpimg.imread(image_path)
+    plt.imshow(image)
+    plt.show()
+    #
+    query_string = input('Next query (empty or "exit" to leave) ? ').strip()
 
 print("Exiting...")
